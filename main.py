@@ -56,7 +56,30 @@ research_area = st.text_input(
 # Busca dos resultados ao clicar no botão
 if st.button("Search"):
     if research_area.strip():  # Valida o input
-        with st.spinner("Seeking Researchers..."):
-           
+        with st.spinner("Seeking Researchers..."):  # Início do bloco with
+            researchers = fetch_top_researchers_by_area(research_area.strip())
+            
+            if researchers:
+                st.success(f"Encontrados {len(researchers)} pesquisadores na área '{research_area}'.")
+                
+                # Exibe os resultados com expanders
+                for i, researcher in enumerate(researchers, start=1):
+                    with st.expander(f"{i}. {researcher['name']}"):
+                        st.write(f"- **Citações**: {researcher['citations']}")
+                        st.write(f"- **Universidade**: {researcher['affiliation']}")
+            else:
+                st.warning(f"Nenhum pesquisador encontrado para a área '{research_area}'.")
+    else:
+        st.warning("Por favor, insira uma área de pesquisa válida.")
+
+# Rodapé com fonte e créditos
+st.write("---")
+st.markdown("**Fonte**: Google Scholar")
+st.markdown(
+    "<p><strong>Ferramenta desenvolvida por Darliane Cunha.</strong></p>", 
+    unsafe_allow_html=True
+)
+
+
 
 
