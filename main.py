@@ -74,9 +74,9 @@ if st.button("Search"):
 
 # Rodapé com fonte e créditos
 st.write("---")
-st.markdown("**Fonte**: Google Scholar")
+st.markdown("**Source**: Google Scholar")
 st.markdown(
-    "<p><strong>Ferramenta desenvolvida por Darliane Cunha.</strong></p>", 
+    "<p><strong>Tool developed by por Darliane Cunha.</strong></p>", 
     unsafe_allow_html=True
 )
 
