@@ -1,85 +1,83 @@
 import streamlit as st
-from scholarly import scholarly
-import time
+from scholarly import scholarly, ProxyGenerator
+import time, random
 
-# Função para buscar os principais pesquisadores por área de pesquisa
+# --- Configuração de proxy para evitar bloqueios do Google Scholar ---
+def setup_scholarly():
+    pg = ProxyGenerator()
+    # Usa proxies gratuitos (pode ser instável; melhor usar API paga em produção)
+    if not pg.FreeProxies(timeout=2, wait_time=60):
+        raise RuntimeError("Não foi possível inicializar proxies.")
+    scholarly.use_proxy(pg)
+
+# --- Função auxiliar com tentativas de repetição ---
+def with_retry(fn, tries=5, base=1.5):
+    for i in range(tries):
+        try:
+            return fn()
+        except Exception as e:
+            if i == tries - 1:
+                raise
+            time.sleep((base ** i) + random.random())
+
+# --- Busca de pesquisadores ---
+@st.cache_data(ttl=3600)
 def fetch_top_researchers_by_area(research_area, max_results=10):
     """
-    Busca os principais pesquisadores em uma área específica no Google Scholar.
-    
-    Args:
-        research_area (str): A área de pesquisa a ser consultada.
-        max_results (int): Número máximo de pesquisadores a buscar.
-    
-    Returns:
-        list: Lista de dicionários com informações dos pesquisadores.
+    Busca pesquisadores por área no Google Scholar.
+    Tenta primeiro autores; se falhar, retorna vazio.
     """
-    try:
-        search_query = scholarly.search_keyword(research_area)
-        top_researchers = []
-        
-        for _ in range(max_results):
-            try:
-                researcher = next(search_query)
-                researcher = scholarly.fill(researcher)  # Carrega o perfil completo
-                
-                # Extrai as informações relevantes
-                name = researcher.get("name", "Nome não disponível")
-                citations = researcher.get("citedby", "Citações não disponíveis")
-                affiliation = researcher.get("affiliation", "Afiliação não disponível")
-                
-                top_researchers.append({
-                    "name": name,
-                    "citations": citations,
-                    "affiliation": affiliation
-                })
-            except StopIteration:
-                break  # Não há mais pesquisadores disponíveis
-            except Exception as inner_error:
-                st.error(f"Erro ao processar um pesquisador: {inner_error}")
-        
-        return top_researchers
-    
-    except Exception as e:
-        st.error(f"Erro ao buscar dados no Google Scholar: {e}")
-        return []
+    setup_scholarly()
+    query = scholarly.search_author(research_area)
+    top_researchers = []
 
-# Interface do Streamlit
+    while len(top_researchers) < max_results:
+        try:
+            author = with_retry(lambda: scholarly.fill(next(query)))
+            top_researchers.append({
+                "name": author.get("name", "N/A"),
+                "citations": author.get("citedby", "N/A"),
+                "affiliation": author.get("affiliation", "N/A")
+            })
+        except StopIteration:
+            break
+        except Exception as e:
+            st.error(f"Erro ao processar pesquisador: {e}")
+            break
+
+    return top_researchers
+
+# --- Interface no Streamlit ---
 st.title("Top Researchers by Research Area")
 
-# Input para a área de pesquisa
 research_area = st.text_input(
-    "Enter a search area (e.g. 'machine learning', 'carbon footprint', 'climate change'):",
-    placeholder="Digite aqui a área de pesquisa..."
+    "Digite a área de pesquisa (ex.: 'machine learning', 'carbon footprint', 'climate change'):",
+    placeholder="Escreva aqui a área de pesquisa..."
 )
 
-# Busca dos resultados ao clicar no botão
-if st.button("Search"):
-    if research_area.strip():  # Valida o input
-        with st.spinner("Seeking Researchers..."):  # Início do bloco with
-            researchers = fetch_top_researchers_by_area(research_area.strip())
-            
+if st.button("Buscar"):
+    if research_area.strip():
+        with st.spinner("Buscando pesquisadores..."):
+            try:
+                researchers = fetch_top_researchers_by_area(research_area.strip())
+            except Exception as e:
+                st.error(f"Erro geral: {e}")
+                researchers = []
+
             if researchers:
                 st.success(f"Encontrados {len(researchers)} pesquisadores na área '{research_area}'.")
-                
-                # Exibe os resultados com expanders
-                for i, researcher in enumerate(researchers, start=1):
-                    with st.expander(f"{i}. {researcher['name']}"):
-                        st.write(f"- **Citações**: {researcher['citations']}")
-                        st.write(f"- **Universidade**: {researcher['affiliation']}")
+                for i, r in enumerate(researchers, start=1):
+                    with st.expander(f"{i}. {r['name']}"):
+                        st.write(f"- **Citações**: {r['citations']}")
+                        st.write(f"- **Universidade**: {r['affiliation']}")
             else:
-                st.warning(f"Nenhum pesquisador encontrado para a área '{research_area}'.")
+                st.warning(f"Nenhum pesquisador encontrado para '{research_area}'.")
     else:
-        st.warning("Por favor, insira uma área de pesquisa válida.")
+        st.warning("Por favor, insira uma área válida.")
 
-# Rodapé com fonte e créditos
 st.write("---")
-st.markdown("**Source**: Google Scholar")
-st.markdown(
-    "<p><strong>Tool developed by por Darliane Cunha.</strong></p>", 
-    unsafe_allow_html=True
-)
-
+st.markdown("**Fonte**: Google Scholar (via biblioteca `scholarly`)")
+st.markdown("<p><strong>Ferramenta desenvolvida por Darliane Cunha</strong></p>", unsafe_allow_html=True)
 
 
 
