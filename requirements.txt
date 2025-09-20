@@ -1,4 +1,22 @@
-streamlit
-scholarly
-pillow
-pandas
+=== Aplicativo de Pesquisa no Google Scholar ===
+
+Este app em Streamlit busca os principais pesquisadores por área de pesquisa no Google Scholar.
+
+FUNCIONAMENTO:
+- Entrada: usuário digita uma área de pesquisa (ex.: "machine learning").
+- O app consulta o Google Scholar usando a biblioteca "scholarly".
+- Resultados: nomes, citações e afiliações dos autores.
+
+MELHORIAS INCLUÍDAS:
+1. ProxyGenerator (FreeProxies) → evita bloqueios do Google Scholar.
+2. Função with_retry → repete tentativas em caso de erro.
+3. Cache com st.cache_data → reduz chamadas repetidas ao Google Scholar.
+4. Tratamento de exceções → mensagens de erro mais claras.
+
+LIMITAÇÕES:
+- "search_author" retorna apenas autores que têm perfis públicos no Scholar.
+- FreeProxies são instáveis (uso de proxies pagos ou SerpAPI é recomendado em produção).
+- O Google pode mudar o HTML do Scholar, quebrando a biblioteca "scholarly".
+
+SUGESTÃO:
+- Para uso confiável, considere trocar o scraping pela API paga "SerpAPI".
