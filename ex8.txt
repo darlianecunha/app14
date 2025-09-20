@@ -1,1 +1,1 @@
-researchers = fetch_top_researchers_by_area(research_area.strip())
+
