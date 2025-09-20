@@ -1,22 +1,33 @@
-=== Aplicativo de Pesquisa no Google Scholar ===
+RESEARCH APP V2 — TOP RESEARCHERS BY AREA (Streamlit)
 
-Este app em Streamlit busca os principais pesquisadores por área de pesquisa no Google Scholar.
+O QUE MUDOU
+- Engine selecionável:
+  1) Auto: usa SerpAPI se houver SERPAPI_KEY; se falhar, faz fallback para Scholarly.
+  2) Apenas SerpAPI.
+  3) Apenas Scholarly.
+- Proxies gratuitos (scholarly) opcionais.
+- Pausas e backoff contra bloqueios do Scholar.
+- Mensagens de erro mais claras.
 
-FUNCIONAMENTO:
-- Entrada: usuário digita uma área de pesquisa (ex.: "machine learning").
-- O app consulta o Google Scholar usando a biblioteca "scholarly".
-- Resultados: nomes, citações e afiliações dos autores.
+COMO USAR
+1) Instale dependências:
+   pip install streamlit requests scholarly
+2) (Opcional) Configure SERPAPI_KEY:
+   export SERPAPI_KEY="sua_chave"
+3) Rode:
+   streamlit run research_app_v2.py
 
-MELHORIAS INCLUÍDAS:
-1. ProxyGenerator (FreeProxies) → evita bloqueios do Google Scholar.
-2. Função with_retry → repete tentativas em caso de erro.
-3. Cache com st.cache_data → reduz chamadas repetidas ao Google Scholar.
-4. Tratamento de exceções → mensagens de erro mais claras.
+QUANDO USAR CADA ENGINE
+- SerpAPI: produção/estabilidade, menos bloqueios e manutenção.
+- Scholarly: ambiente de testes/estudos. Ative proxies gratuitos na UI.
 
-LIMITAÇÕES:
-- "search_author" retorna apenas autores que têm perfis públicos no Scholar.
-- FreeProxies são instáveis (uso de proxies pagos ou SerpAPI é recomendado em produção).
-- O Google pode mudar o HTML do Scholar, quebrando a biblioteca "scholarly".
+ERROS COMUNS E SOLUÇÕES
+- "Falha ao obter proxies": desmarque "Usar proxies" ou tente novamente (rede/provedores variam).
+- "Import scholarly falhou": instale/atualize a lib (`pip install -U scholarly`).
+- Nenhum resultado: tente termos mais amplos; reduza "Qtd. pesquisadores".
+- Bloqueios do Scholar: intervalos maiores, menos requisições, use SerpAPI.
 
-SUGESTÃO:
-- Para uso confiável, considere trocar o scraping pela API paga "SerpAPI".
+BOAS PRÁTICAS
+- Limite de requisições por sessão.
+- Use cache externo (ex.: salvar resultados em CSV/DB).
+- Prefira SerpAPI para apps públicos/Streamlit Cloud.
