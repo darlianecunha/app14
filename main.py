@@ -1,83 +1,165 @@
+import os
+import time
+import random
+import requests
 import streamlit as st
-from scholarly import scholarly, ProxyGenerator
-import time, random
+from typing import List, Dict, Tuple
 
-# --- Configuração de proxy para evitar bloqueios do Google Scholar ---
-def setup_scholarly():
-    pg = ProxyGenerator()
-    # Usa proxies gratuitos (pode ser instável; melhor usar API paga em produção)
-    if not pg.FreeProxies(timeout=2, wait_time=60):
-        raise RuntimeError("Não foi possível inicializar proxies.")
-    scholarly.use_proxy(pg)
+# scholarly é opcional se você optar por usar só SerpAPI
+try:
+    from scholarly import scholarly, ProxyGenerator
+    HAS_SCHOLARLY = True
+except Exception:
+    HAS_SCHOLARLY = False
 
-# --- Função auxiliar com tentativas de repetição ---
-def with_retry(fn, tries=5, base=1.5):
-    for i in range(tries):
-        try:
-            return fn()
-        except Exception as e:
-            if i == tries - 1:
-                raise
-            time.sleep((base ** i) + random.random())
 
-# --- Busca de pesquisadores ---
-@st.cache_data(ttl=3600)
-def fetch_top_researchers_by_area(research_area, max_results=10):
+# -------------- Configurações da Página --------------
+st.set_page_config(page_title="Top Researchers by Research Area", layout="wide")
+st.title("Top Researchers by Research Area")
+
+# -------------- Utilitários --------------
+def jitter_sleep(base_low=0.7, base_high=1.4):
+    time.sleep(random.uniform(base_low, base_high))
+
+def setup_scholarly(use_proxies: bool) -> Tuple[bool, str]:
     """
-    Busca pesquisadores por área no Google Scholar.
-    Tenta primeiro autores; se falhar, retorna vazio.
+    Tenta configurar proxies grátis. Retorna (ok, msg).
     """
-    setup_scholarly()
-    query = scholarly.search_author(research_area)
-    top_researchers = []
+    if not HAS_SCHOLARLY:
+        return False, "Biblioteca 'scholarly' não disponível (import falhou)."
+    if not use_proxies:
+        return True, "Sem proxies (modo direto)."
+    try:
+        pg = ProxyGenerator()
+        ok = pg.FreeProxies(timeout=2, wait_time=60)
+        if ok:
+            scholarly.use_proxy(pg)
+            return True, "Proxies gratuitos habilitados."
+        else:
+            return False, "Falha ao obter proxies gratuitos."
+    except Exception as e:
+        return False, f"Erro ao configurar proxies: {e}"
 
-    while len(top_researchers) < max_results:
+def scholarly_fetch_authors(area: str, max_results: int, use_proxies: bool) -> List[Dict]:
+    """
+    Busca autores via scholarly.search_author(area).
+    Tenta contornar bloqueios com pequenas pausas e captura de erros.
+    """
+    ok_proxy, proxy_msg = setup_scholarly(use_proxies)
+    results: List[Dict] = []
+    if not HAS_SCHOLARLY:
+        st.info("Pulei scholarly: não está instalado/operante. Use SerpAPI (recomendado) ou instale a lib.")
+        return results
+
+    try:
+        q = scholarly.search_author(area)
+    except Exception as e:
+        st.error(f"Falha ao iniciar pesquisa no scholarly: {e}")
+        return results
+
+    consecutive_errors = 0
+    while len(results) < max_results:
         try:
-            author = with_retry(lambda: scholarly.fill(next(query)))
-            top_researchers.append({
+            author = next(q)              # pode falhar se bloqueado/sem mais resultados
+            author = scholarly.fill(author)  # carrega detalhes do perfil
+            results.append({
                 "name": author.get("name", "N/A"),
                 "citations": author.get("citedby", "N/A"),
                 "affiliation": author.get("affiliation", "N/A")
             })
+            consecutive_errors = 0
+            jitter_sleep(0.8, 1.8)  # pequena pausa entre requisições
         except StopIteration:
             break
         except Exception as e:
-            st.error(f"Erro ao processar pesquisador: {e}")
-            break
+            consecutive_errors += 1
+            st.warning(f"Erro ao buscar/ler autor (tentativa {consecutive_errors}): {e}")
+            # backoff simples
+            time.sleep(min(6, 1.5 ** consecutive_errors))
+            if consecutive_errors >= 3 and len(results) == 0:
+                # provavelmente bloqueado; abandona cedo para permitir fallback
+                break
+            continue
 
-    return top_researchers
+    # Feedback de proxy
+    st.caption(f"Estado dos proxies scholarly: {proxy_msg}")
+    return results
 
-# --- Interface no Streamlit ---
-st.title("Top Researchers by Research Area")
 
-research_area = st.text_input(
-    "Digite a área de pesquisa (ex.: 'machine learning', 'carbon footprint', 'climate change'):",
-    placeholder="Escreva aqui a área de pesquisa..."
-)
+def serpapi_fetch_authors(area: str, max_results: int, api_key: str) -> List[Dict]:
+    """
+    Usa SerpAPI (engine google_scholar_author) – solução estável para produção.
+    """
+    url = "https://serpapi.com/search"
+    params = {
+        "engine": "google_scholar_author",
+        "q": area,
+        "api_key": api_key,
+    }
+    try:
+        r = requests.get(url, params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        out = []
+        for item in (data.get("authors") or [])[:max_results]:
+            out.append({
+                "name": item.get("name", "N/A"),
+                "citations": (item.get("cited_by") or {}).get("table", [{}])[0].get("citations", "N/A")
+                             if isinstance(item.get("cited_by"), dict) else item.get("cited_by"),
+                "affiliation": item.get("affiliations", "N/A"),
+            })
+        return out
+    except Exception as e:
+        st.error(f"Erro na SerpAPI: {e}")
+        return []
+
+
+# -------------- Interface (opções) --------------
+with st.sidebar:
+    st.header("Configurações")
+    max_results = st.number_input("Qtd. pesquisadores", min_value=1, max_value=50, value=10, step=1)
+    engine = st.selectbox(
+        "Engine",
+        options=["Auto (SerpAPI se houver chave, senão Scholarly)", "Apenas SerpAPI", "Apenas Scholarly"]
+    )
+    use_proxies = st.checkbox("Usar proxies gratuitos (scholarly)", value=True)
+    serpapi_key = st.text_input("SERPAPI_KEY (opcional)", type="password", value=os.getenv("SERPAPI_KEY", ""))
+
+area = st.text_input("Área de pesquisa (ex.: 'machine learning', 'carbon footprint', 'climate change')",
+                     placeholder="Digite a área...")
 
 if st.button("Buscar"):
-    if research_area.strip():
-        with st.spinner("Buscando pesquisadores..."):
-            try:
-                researchers = fetch_top_researchers_by_area(research_area.strip())
-            except Exception as e:
-                st.error(f"Erro geral: {e}")
-                researchers = []
-
-            if researchers:
-                st.success(f"Encontrados {len(researchers)} pesquisadores na área '{research_area}'.")
-                for i, r in enumerate(researchers, start=1):
-                    with st.expander(f"{i}. {r['name']}"):
-                        st.write(f"- **Citações**: {r['citations']}")
-                        st.write(f"- **Universidade**: {r['affiliation']}")
-            else:
-                st.warning(f"Nenhum pesquisador encontrado para '{research_area}'.")
+    if not area.strip():
+        st.warning("Informe uma área de pesquisa válida.")
     else:
-        st.warning("Por favor, insira uma área válida.")
+        with st.spinner("Buscando pesquisadores..."):
+            results: List[Dict] = []
+
+            # Seleção do mecanismo
+            use_serpapi = (engine in ["Apenas SerpAPI"]) or \
+                          (engine.startswith("Auto") and bool(serpapi_key))
+
+            if use_serpapi:
+                results = serpapi_fetch_authors(area.strip(), max_results, serpapi_key)
+                if not results and engine.startswith("Auto"):
+                    st.info("SerpAPI não retornou resultados. Tentando scholarly como fallback...")
+                    results = scholarly_fetch_authors(area.strip(), max_results, use_proxies)
+            else:
+                results = scholarly_fetch_authors(area.strip(), max_results, use_proxies)
+
+        # Exibição
+        if results:
+            st.success(f"Encontrados {len(results)} pesquisadores para '{area}'.")
+            for i, r in enumerate(results, start=1):
+                with st.expander(f"{i}. {r.get('name','N/A')}"):
+                    st.write(f"- **Citações**: {r.get('citations','N/A')}")
+                    st.write(f"- **Universidade**: {r.get('affiliation','N/A')}")
+        else:
+            st.warning("Nenhum resultado. Dicas:\n"
+                       "• Ative proxies (scholarly) ou use SERPAPI_KEY\n"
+                       "• Tente palavras-chave mais gerais\n"
+                       "• Reduza a quantidade de resultados inicialmente")
 
 st.write("---")
-st.markdown("**Fonte**: Google Scholar (via biblioteca `scholarly`)")
-st.markdown("<p><strong>Ferramenta desenvolvida por Darliane Cunha</strong></p>", unsafe_allow_html=True)
-
-
-
+st.markdown("**Fontes**: Google Scholar (via `scholarly`) e/ou SerpAPI.")
+st.caption("Dica: para produção, prefira SerpAPI pela estabilidade e políticas de uso.")
